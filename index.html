@@ -217,10 +217,10 @@
           return;
         }
 
-        if (data.result === "false_start") {
-          setStatus("False start!");
+        if (data.result === "failed") {
+          setStatus("Failed attempt.");
           setTimer("--");
-          noteEl.textContent = "Wait for GO next time.";
+          noteEl.textContent = "Clicked before GO.";
           noteEl.className = "bad";
         } else if (data.result === "ok") {
           setStatus("Time");

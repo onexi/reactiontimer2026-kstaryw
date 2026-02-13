@@ -118,7 +118,8 @@ class Handler(BaseHTTPRequestHandler):
         if now < go_at:
             session["used"] = True
             return json_response(self, 200, {
-                "result": "false_start",
+                "result": "failed",
+                "reason": "before_go",
                 "too_fast": False,
                 "reaction_ms": None,
                 "best_time_ms": best_time_ms,
