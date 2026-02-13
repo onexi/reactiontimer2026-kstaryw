@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reaction Timer</title>
+    <style>
+      :root {
+        --bg: #0f1320;
+        --panel: #151b2e;
+        --text: #f3f5ff;
+        --muted: #9aa3c7;
+        --accent: #6ee7b7;
+        --warn: #fbbf24;
+        --bad: #f87171;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Fira Sans", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, #1a2342, #0b0f1c 55%);
+        color: var(--text);
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      .card {
+        width: min(560px, 92vw);
+        background: var(--panel);
+        border: 1px solid #263055;
+        border-radius: 18px;
+        padding: 28px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0 0 6px 0;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+
+      .sub {
+        margin: 0 0 18px 0;
+        color: var(--muted);
+      }
+
+      .stage {
+        margin: 18px 0;
+        padding: 24px;
+        border-radius: 14px;
+        border: 1px dashed #2e3a67;
+        text-align: center;
+        background: #0c1120;
+        transition: background 0.2s ease;
+      }
+
+      .stage.go {
+        background: #0f1f1a;
+        border-color: #1f3d33;
+      }
+
+      .timer {
+        font-size: 48px;
+        font-weight: 700;
+        margin: 6px 0 12px;
+      }
+
+      .button {
+        width: 100%;
+        padding: 16px;
+        border-radius: 12px;
+        border: none;
+        background: var(--accent);
+        color: #062015;
+        font-size: 18px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .button[disabled] {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .meta {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .flag {
+        color: var(--warn);
+        font-weight: 700;
+      }
+
+      .bad {
+        color: var(--bad);
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Reaction Timer</h1>
+      <p class="sub">Wait for GO, then click as fast as you can.</p>
+
+      <div id="stage" class="stage">
+        <div id="status">Press Start to begin.</div>
+        <div id="timer" class="timer">--</div>
+      </div>
+
+      <button id="action" class="button">Start</button>
+
+      <div class="meta">
+        <div>Fastest: <span id="best">--</span></div>
+        <div id="note"></div>
+      </div>
+    </div>
+
+    <script>
+      const stage = document.getElementById("stage");
+      const statusEl = document.getElementById("status");
+      const timerEl = document.getElementById("timer");
+      const actionBtn = document.getElementById("action");
+      const bestEl = document.getElementById("best");
+      const noteEl = document.getElementById("note");
+
+      let sessionId = null;
+      let goTimeout = null;
+      let goAtClient = null;
+      let inRound = false;
+
+      const setStatus = (text) => {
+        statusEl.textContent = text;
+      };
+
+      const setTimer = (text) => {
+        timerEl.textContent = text;
+      };
+
+      const formatMs = (ms) => `${ms} ms`;
+
+      const resetUI = () => {
+        stage.classList.remove("go");
+        setStatus("Press Start to begin.");
+        setTimer("--");
+        actionBtn.textContent = "Start";
+        actionBtn.disabled = false;
+        noteEl.textContent = "";
+        noteEl.className = "";
+        inRound = false;
+        sessionId = null;
+        goAtClient = null;
+        if (goTimeout) {
+          clearTimeout(goTimeout);
+          goTimeout = null;
+        }
+      };
+
+      const startRound = async () => {
+        actionBtn.disabled = true;
+        setStatus("Get ready...");
+        setTimer("--");
+        noteEl.textContent = "";
+        noteEl.className = "";
+        stage.classList.remove("go");
+
+        const res = await fetch("/start", { method: "POST" });
+        const data = await res.json();
+        sessionId = data.session_id;
+        inRound = true;
+        const delay = data.delay_ms;
+        goAtClient = performance.now() + delay;
+
+        goTimeout = setTimeout(() => {
+          stage.classList.add("go");
+          setStatus("GO!");
+          actionBtn.textContent = "CLICK!";
+          actionBtn.disabled = false;
+        }, delay);
+      };
+
+      const sendClick = async () => {
+        if (!sessionId) {
+          resetUI();
+          return;
+        }
+
+        actionBtn.disabled = true;
+        const res = await fetch("/click", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        const data = await res.json();
+
+        if (data.error === "rate_limited") {
+          setStatus("Too many clicks.");
+          setTimer("--");
+          noteEl.textContent = "Rate limit hit — round canceled.";
+          noteEl.className = "bad";
+          actionBtn.textContent = "Start";
+          actionBtn.disabled = false;
+          inRound = false;
+          return;
+        }
+
+        if (data.error === "session_used") {
+          resetUI();
+          return;
+        }
+
+        if (data.result === "false_start") {
+          setStatus("False start!");
+          setTimer("--");
+          noteEl.textContent = "Wait for GO next time.";
+          noteEl.className = "bad";
+        } else if (data.result === "ok") {
+          setStatus("Time");
+          setTimer(formatMs(data.reaction_ms));
+          if (data.too_fast) {
+            noteEl.textContent = "Flagged: too fast to be human.";
+            noteEl.className = "flag";
+          } else {
+            noteEl.textContent = "Valid reaction recorded.";
+            noteEl.className = "";
+          }
+        }
+
+        if (data.best_time_ms !== null && data.best_time_ms !== undefined) {
+          bestEl.textContent = formatMs(data.best_time_ms);
+        }
+
+        actionBtn.textContent = "Start";
+        actionBtn.disabled = false;
+        inRound = false;
+      };
+
+      actionBtn.addEventListener("click", () => {
+        if (!inRound) {
+          startRound().catch(() => resetUI());
+          return;
+        }
+        sendClick().catch(() => resetUI());
+      });
+
+      fetch("/best")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.best_time_ms !== null && data.best_time_ms !== undefined) {
+            bestEl.textContent = formatMs(data.best_time_ms);
+          }
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>
